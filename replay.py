@@ -5,7 +5,7 @@ class GameMode(Enum):
     Standard = 0
     Taiko = 1
     CatchTheBeat = 2
-    Mania = 3
+    Osumania = 3
 
 
 class Mod(Enum):
@@ -76,6 +76,7 @@ class Replay(object):
         self.life_bar_graph = None
         self.timestamp = None
         self.frames = None
+        self.totalTime = 0
 
         with open(replay_path, 'rb') as f:
             data = f.read()

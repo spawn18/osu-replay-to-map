@@ -1,38 +1,12 @@
 from hitobjects import *
-import re
-import copy
+from utils import Point, fileToSvm
 
-class TimingPoint:
-    Inherited = 0
-    Uninherited = 1
-    
-class Event:
-    def __init__(eventType=str(), startTime=int()):
-        self.eventType = eventType
-        self.startTime = startTime
-
-class Background(Event):
-    def __init__(eventType=str(), startTime=int(), filename=str(), xOffset=int(), yOffset=int()):
-        super().__init__(eventType, startTime)
-        self.filename = filename
-        self.xOffset = xOffset
-        self.yOffset = yOffset
-
-class Video(Event):
-    def __init__(eventType=str(), startTime=int(), filename=str(), xOffset=int(), yOffset=int()):
-        super().__init__(eventType, startTime)
-        self.filename = filename
-        self.xOffset = xOffset
-        self.yOffset = yOffset
-
-class Break(Event):
-    def __init__(eventType=str(), startTime=int(), endTime=int()):
-        super().__init__(eventType, startTime):
-        self.endTime = endTime
 
 class Beatmap:
-    def __init__(self, fullpath=None):
-        self.formatVersion = None
+    def __init__(self, fullpath):
+        self.hitTimeWindows = dict()
+        self.circleRadius = 0
+
         self.general = dict()
         self.editor = dict()
         self.metadata = dict()
@@ -40,100 +14,112 @@ class Beatmap:
         self.events = list()
         self.timingPoints = list()
         self.colours = dict()
-        self.hitObjects = list()
-        
-        with open(fullpath, encoding="utf8") as file:
-            lines = file.readlines()
-            
-            self._section = -1
+        self.hitobjects = list()
+        self.section = -1
 
-            for line in lines:
-                self.parseLine(line.replace("\n", ""))
-        
-    def getTimingPoint(self, time, uninherited):
+        try:
+            file = open(fullpath, encoding="utf8")
+            rawLines = file.readlines()
+
+            tmp = fullpath.split("\\")
+            if tmp:
+                self.path = "".join(tmp[:-1])
+                self.filename = "".join(tmp[-1])
+            else:
+                self.path = str()
+                self.filename = fullpath
+                
+            self.osuFileVersion = rawLines[0].replace("\n", "")
+            
+            for line in rawLines:
+                self.parse_line(line.replace("\n", ""))
+
+            #
+            #         |                                              |
+            #   miss  |  50  |  100  |  300  I  300  |  100  |  50   |  miss
+            #         [______________________________________________]
+            #                         Minimal HitTimeWindow
+            self.hitTimeWindows["300"] = 79 - (self.difficulty["OverallDifficulty"] * 6)  + 0.5
+            self.hitTimeWindows["100"] = 139 - (self.difficulty["OverallDifficulty"] * 8) + 0.5
+            self.hitTimeWindows["50"] = 199 - (self.difficulty["OverallDifficulty"] * 10) + 0.5
+            self.hitTimeWindows["miss"] = 259 - (self.difficulty["OverallDifficulty"] * 12) + 0.5
+
+            self.circleRadius = (109 - 9 * self.difficulty["CircleSize"]) / 2
+            
+        except IOError:
+            print("Error: beatmap couldn't be opened")
+
+
+
+    def getUninheritedPoint(self, objectTime):
         r = None
-        
-        for tp in self.timingPoints:
-            if tp.time <= time:
-                if tp.uninherited == uninherited:
+
+        for point in self.timingPoints:
+            if point.time <= objectTime:
+                if point.type == 1:
+                    r = point
+            else:
+                break
+
+        return r
+
+    def getInheritedPoint(self, uninheritedPoint, objectTime):
+        r = None
+
+        for point in self.timingPoints:
+            if point.time <= objectTime:
+                if point.time >= uninheritedPoint.time and point.type == 0:
                     r = point
             else:
                 break
 
         return r
         
-    def parseLine(self, line, section):
+    def parse_line(self, line):
+
         if len(line) < 1 or line == "\n":
             return
         
         if line.startswith("["):
-            if line == "[General]": 
+            if line == "[General]":
                 self.section = 0
-            elif line == "[Editor]": 
+            elif line == "[Editor]":
                 self.section = 1
-            elif line == "[Metadata]": 
+            elif line == "[Metadata]":
                 self.section = 2
-            elif line == "[Difficulty]": 
+            elif line == "[Difficulty]":
                 self.section = 3
-            elif line == "[Events]": 
+            elif line == "[Events]":
                 self.section = 4
-            elif line == "[TimingPoints]": 
+            elif line == "[TimingPoints]":
                 self.section = 5
-            elif line == "[Colours]": 
+            elif line == "[Colours]":
                 self.section = 6
-            elif line == "[HitObjects]": 
+            elif line == "[HitObjects]":
                 self.section = 7
-            else: 
-                self.section =  -1
-        
-        if self.section == 0: 
-            self.parseGeneral(line)
-        elif self.section == 1: 
-            self.parseEditor(line)
-        elif self.section == 2: 
-            self.parseMetadata(line)
-        elif self.section == 3: 
-            self.parseDifficulty(line)
-        elif self.section == 4: 
-            self.parseEvents(line)
-        elif self.section == 5: 
-            self.parseTimingPoints(line)
-        elif self.section == 6: 
-            self.parseColors(line)
-        elif self.section == 7: 
-            self.parseHitObjects(line)
-        else:
+            else:
+                self.section = -1
             return
         
-    def parseGeneral(self, line):
-        line = line.split(":")
+        if self.section == 0:
+            self.handle_general(line)
+        elif self.section == 1:
+            self.handle_editor(line)
+        elif self.section == 2:
+            self.handle_metadata(line)
+        elif self.section == 3:
+            self.handle_difficulty(line)
+        elif self.section == 4:
+            self.handle_events(line)
+        elif self.section == 5:
+            self.handle_timingpoint(line)
+        elif self.section == 6:
+            self.handle_colours(line)
+        elif self.section == 7:
+            self.handle_hitobject(line)
 
-        if line[0] == "AudioFilename":
-            self.general[line[0]] = line[1]
-        elif line[0] == "SampleSet":
-            self.general[line[0]] = line[1]
-        elif line[0] == "StackLeniency":
-            self.general[line[0]] = float(line[1])
-        else:
-            self.general[line[0]] = int(line[1])
-            
-    def parseEditor(self, line):
+    def handle_metadata(self, line):
         line = line.split(":")
-        
-        if line[0] == "Bookmarks":
-            self.editor[line[0]] = line[1].split(",")
-        elif line[0] == "DistanceSpacing":
-            self.editor[line[0]] = float(line[1])
-        elif line[0] == "TimelineZoom":
-            self.editor[line[0]] = float(line[1])
-        else:
-            self.editor[line[0]] = int(line[1]) 
-
-    def parseMetadata(self, line):
-        line = line.split(":")
-
-        if len(line) > 2:
-            self.metadata[line[0]] = "".join(line)
 
         if line[0] == "Tags":
             self.metadata[line[0]] = line[1].split(" ")
@@ -144,180 +130,234 @@ class Beatmap:
         else:  
             self.metadata[line[0]] = line[1]
         
-    def parseDifficulty(self, line):
+    def handle_difficulty(self, line):
         line = line.split(":")
         self.difficulty[line[0]] = float(line[1])
 
-    def parseEvents(self, line):
-        self.events.append(line)
-
-    def parseTimingPoints(self, line):
-        line = line.split(",")
-
-        tp = TimingPoint()
-        tp.time = int(line[0])
-        tp.beatLength = float(line[1]),
-        tp.meter = int(line[2]),
-        tp.sampleSet = int(line[3]),
-        tp.sampleIndex = int(line[4]),
-        tp.volume = int(line[5]),
-        tp.uninherited = bool(int(line[6]))
-        tp.effects = int(line[7])
-        
-        self.timingPoints.append(tp)
-
-    def parseColours(self, line):
+    def handle_colours(self, line):
         line = line.split(":")
         self.colours[line[0]] = line[1]
         
-    def parseHitObjects(self, line):
+    def handle_general(self, line):
+        line = line.split(":")
+
+        if line[0] == "AudioFilename":
+            self.general[line[0]] = line[1]
+        elif line[0] == "SampleSet":
+            self.general[line[0]] = line[1]
+        elif line[0] == "StackLeniency":
+            self.general[line[0]] = float(line[1])
+        else:
+            self.general[line[0]] = int(line[1])
+
+    def handle_events(self, line):
+        self.events.append(line)
+        
+    def handle_editor(self, line):
+        line = line.split(":")
+        
+        if line[0] == "Bookmarks":
+            self.editor[line[0]] = line[1].split(",")
+        elif line[0] == "DistanceSpacing":
+            self.editor[line[0]] = float(line[1])
+        elif line[0] == "TimelineZoom":
+            self.editor[line[0]] = float(line[1])
+        else:
+            self.editor[line[0]] = int(line[1])
+        
+
+    def handle_timingpoint(self, line):
+        
+        line = line.split(",")
+
+        timingPoint = TimingPoint(int(line[0]),
+                                   float(line[1]),
+                                   int(line[2]),
+                                   int(line[3]),
+                                   int(line[4]),
+                                   int(line[5]),
+                                   int(line[6]),
+                                   int(line[7]))
+        
+        self.timingPoints.append(timingPoint)
+        
+
+
+    def handle_hitobject(self, line):
 
         line = line.split(",")
 
         x = int(line[0]) 
         y = int(line[1]) 
         time = int(line[2])
-        type_ = int(line[3]) 
-        hitSound = int(line[4])  
+        objectType = int(line[3]) 
+        hitsound = int(line[4])  
+
+        hitobject = None
 
         # Circle
-        if 1 & int(type_): 
-            hitObject = Circle(x, y, time, type_, hitSound)
-            hitObject.hitSample = int(line[5])
+        if 1 & int(objectType): 
+            hitobject = Circle(x, y, time, objectType, hitsound)
+            if len(line) > 5:
+                hitobject.hitsample = line[5]
 
         # Slider      
-        if 2 & int(type_):
-            hitObject = Slider(x, y, time, type_, hitSound)
+        if 2 & int(objectType):
+            hitobject = Slider(x, y, time, objectType, hitsound)
             
-            l = line[5].split("|")
-            hitObject.curveType = l[0]
-
-            for i in range(1, len(l)):
-                coords = l[i].split(":")
-                hitObject.curvePoints.append(Point(int(coords[0]), int(coords[1])))
+            curveSplit = line[5].split("|")
+            
+            hitobject.curveType = curveSplit[0]
+            for i in range(1, len(curveSplit)):
+                vectorSplit = curveSplit[i].split(":")
+                hitobject.curvePoints.append(Point(int(vectorSplit[0]), int(vectorSplit[1])))
                         
-            hitObject.slides = int(line[6])
-            hitObject.length = float(line[7])
+            hitobject.slides = int(line[6])
+            hitobject.length = float(line[7])
 
-        # Spinner 
-        if 8 & int(type_):         
-            hitObject = Spinner(x, y, time, type_, hitSound)
-            hitObject.endTime = int(line[5])
-            hitObject.hitSample = int(line[6])
+            if len(line) > 8:
+                hitobject.edgeSounds = line[8]
+                hitobject.edgeSets = line[9]
+                hitobject.hitsample = line[10]
+
+
+            uninheritedPoint = self.getUninheritedPoint(hitobject.time)
+            inheritedPoint = self.getInheritedPoint(uninheritedPoint, hitobject.time)
+            if(inheritedPoint == None):
+                hitobject.calcDuration(self.difficulty["SliderMultiplier"], uninheritedPoint.beatLength, 1)
+            else:
+                hitobject.calcDuration(self.difficulty["SliderMultiplier"], uninheritedPoint.beatLength, fileToSvm(inheritedPoint.beatLength))
+                                
+        if 8 & int(objectType): # Spinner          
+            hitobject = Spinner(x, y, time, objectType, hitsound)
+            hitobject.endtime = int(line[5])
+            if len(line) > 6:
+                hitobject.hitsample = line[6]
 
         
-        self.hitObjects.append(hitObject)
+        self.hitobjects.append(hitobject)
 
 
     def replaceHitObject(self, hitobject):
-        for h in self.hitObjects:
-            if h.time == h.time:
-                h = hitobject
+        
+        for i in range(0, len(self.hitobjects)):
+            if self.hitobjects[i].time == hitobject.time:
+                self.hitobjects[i] = hitobject
                 return True
+            
         return False
             
     def addTimingPoint(self, timingPoint):
-        for i, tp in enumerate(self.timingPoints):
-            if tp.time == timingPoint.time and tp.uninherited == timingPoint.uninherited:
-                tp = timingPoint
+
+        insert_index = 0
+
+        for i in range(0, len(self.timingPoints)):
+            if self.timingPoints[i].time == timingPoint.time and self.timingPoints[i].type == timingPoint.type:
+                self.timingPoints[i] = timingPoint
                 return
             
-            elif tp.time > timingPoint.time:
+            elif self.timingPoints[i].time > timingPoint.time:
                 self.timingPoints.insert(i, timingPoint)
                 return
 
-    # Writing to file and naming it properly
-    def write_beatmap(beatmap, file):
-        file.write(self.formatVersion + "\n\n")
+            insert_index = i
+
+        self.timingPoints.insert(insert_index, timingPoint)
         
-        # [General]
-        file.write(("[General]\n")
+        
+    # Writing to file and naming it properly
+    def writeFile(self):
+            
+        fileLine = self.osuFileVersion + "\n\n"
+        
+        # Insert [General] section
+        fileLine += "[General]\n"
         for k, v in self.general.items():
-            file.write(k + ":" + str(v) + "\n")
-        file.write("\n")
+            fileLine += k + ":" + str(v) + "\n"
+        fileLine += "\n"
 
-
-        # [Editor]
-        file.write("[Editor]\n")
+        # Insert [Editor] section
+        fileLine += "[Editor]\n"
         for k, v in self.editor.items():
             if k == "Bookmarks":
-                file.write(k + ":" + "".join(v) + "\n")
+                fileLine += k + ":" + ",".join(v) + "\n"
             else:
-                file.write(k + ":" + str(v) + "\n")
-        file.write("\n")
+                fileLine += k + ":" + str(v) + "\n"
+        fileLine += "\n"
 
-        # [Metadata] section
-        file.write("[Metadata]\n")
+        # Insert [Metadata] section
+        fileLine += "[Metadata]\n"
         for k, v in self.metadata.items():
             if k == "Tags":
-                file.write(k + ":" + " ".join(v) + "\n")
+                fileLine += k + ":" + " ".join(v) + "\n"
             else:
-                file.write(k + ":" + str(v) + "\n")
-        file.write("\n")
+                fileLine += k + ":" + str(v) + "\n"
+        fileLine += "\n"
 
-        # [Difficulty] section
-        file.write("[Diffculty]\n")
+        # Insert [Difficulty] section
+        fileLine += "[Difficulty]\n"
         for k, v in self.difficulty.items():
-            file.write(k + ":" + str(v) + "\n")
-        file.write("\n")
+            fileLine += k + ":" + str(v) + "\n"
+        fileLine += "\n"
 
-        # [Events] section
-        file.write("[Events]\n")
+        # Insert [Events] section
+        fileLine += "[Events]\n"
         for i in self.events:
-            file.write(i + "\n")
-        file.write("\n")
+            fileLine += i + "\n"
+        fileLine += "\n"
 
-        # [TimingPoints] section
-        file.write("[TimingPoints]\n")
-        for i in self.timing_points:
-            file.write(str(i.time) + ",") 
 
+        # Insert [TimingPoints] section
+        fileLine += "[TimingPoints]\n"
+        for i in self.timingPoints:
+            fileLine += str(i.time) + ","
             if i.type == 1:
-                file.write(str(i.beatLength) + ",")
-            else:
-                file.write(str(-100 / i.beatLength) + ",")
+                fileLine += str(i.beatLength)
+            elif i.type == 0:
+                fileLine += str(i.beatLength)
 
-            file.write(str(i.meter) + ","
-                     + str(i.sampleSet) + "," 
-                     + str(i.sampleIndex) + "," 
-                     + str(i.volume) + "," 
-                     + str(i.type) + "," 
-                     + str(i.effect) + "\n")
+            fileLine += "," + str(i.meter) + "," + str(i.sampleSet) + "," + str(i.sampleIndex) + "," + str(i.volume) + "," + str(i.type) + "," + str(i.effect) + "\n"
+        fileLine += "\n"
 
-        file.write("\n")
-
-        # [Colours] section
+        # Insert [Colours] section
         if self.colours:
-            file.write("[Colours]\n")
+            fileLine += "[Colours]\n"
             for k, v in self.colours.items():
-                file.write(k + ":" + v + "\n")
-            file.write("\n")
+                fileLine += k + ":" + v + "\n"
+            fileLine += "\n"
 
-        # [Hitobjects] section
-        file.write("[Hitobjects]\n")
+        # Insert [HitObjects] section
+        fileLine += "[HitObjects]\n"
         for i in self.hitobjects:
-            file.write(str(i.x) + "," 
-                     + str(i.y) + "," 
-                     + str(i.time) + "," 
-                     + str(i.type) + "," 
-                     + str(i.hitsound) + ",")
+            fileLine += str(i.x) + "," + str(i.y) + "," + str(i.time) + "," + str(i.type) + "," + str(i.hitsound)
             
             # Circle
-            if i.type & HitObject.Circle:
-                file.write(str(i.hitsample) + "\n")
-                
+            if i.type & 1:
+                if i.hitsample != None:
+                    fileLine += "," + str(i.hitsample)
+
             # Slider
-            if i.type & HitObject.Slider:
-                file.write(str(i.curveType))
+            if i.type & 2:
+                fileLine += "," + str(i.curveType)
                 for j in i.curvePoints:
-                    file.write("|" + str(int(j.x)) + ":" + str(int(j.y)))
-                file.write("," + str(i.slides) + "," + str(i.length) + "\n")
+                    fileLine += "|" + str(int(j.x)) + ":" + str(int(j.y))
+                fileLine += "," + str(i.slides) + "," + str(i.length)
+
+                if(i.hitsample != None):
+                    fileLine += "," + str(i.edgeSounds) + "," + str(i.edgeSets) + "," + str(i.hitsample)
 
             # Spinner
-            if i.type & HitObject.Spinner:
-                file.write(str(endtime) + str(hitsample) + "\n")
+            if i.type & 8:
+                fileLine += "," + str(i.endtime)
+                if(i.hitsample != None):
+                    fileLine += "," + str(i.hitsample)
 
-        file.write("\n")
-    
-        
+            fileLine += "\n"
 
+        fileLine += "\n"
+
+        self.filename = self.filename.replace("<", "")
+        self.filename = self.filename.replace(">", "")
+        self.filename = self.filename.replace("?", "")
+        with open(self.path + self.filename, "w+", encoding="utf-8") as fileOut:
+            fileOut.write(fileLine)

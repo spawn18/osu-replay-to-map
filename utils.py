@@ -1,66 +1,17 @@
+import math
 
 from replay import Mod
 
-screenW = 512
-screenH = 384
-
-class Key:
-    M1 = 1
-    M2 = 2
-    K1 = 4
-    K2 = 8
-
-def get_hit_window(od, mods=None):
-    hitwindow = {"300": od * -12, "100": od * -16, "50": od * -20}
-
-    if is_mod_set(mods, Mod.Easy):
-        hitwindow["300"] /= 2
-        hitwindow["100"] /= 2
-        hitwindow["50"] /= 2
-
-    else if is_mod_set(mods, Mod.HardRock):
-        hitwindow["300"] *= 1.4
-        hitwindow["100"] *= 1.4
-        hitwindow["50"] *= 1.4
-
-    hitwindow["300"] += 160
-    hitwindow["100"] += 180
-    hitwindow["50"] += 400
-
-    if is_mod_set(mods, Mod.DoubleTime):
-        hitwindow["300"] *= 0.66
-        hitwindow["100"] *= 0.66
-        hitwindow["50"] *= 0.66
-
-    else if is_mod_set(mods, Mod.HalfTime):
-        hitwindow["300"] *= 1.33
-        hitwindow["100"] *= 1.33
-        hitwindow["50"] *= 1.33
-
-    return hitwindow 
-
-def get_circle_radius(cs)
-    return 54.4 - 4.48 * cs
-
-class Color:
-    def __init__(R=0, G=0, B=0):
-        self.R = int()
-        self.G = int()
-        self.B = int()
-
-    def format(self);
-        return str("(" + R + "," + G + "," + B + ")")
+screen_width = 512
+screen_height = 384
 
 class Point:
-    def __init__(self, x=0, y=0):
+    def __init__(self, x, y):
         self.x = x
         self.y = y
 
     def __eq__(self, p):
-        if self.x == p.x and self.y == p.y:
-            return True
-        else:
-            return False
+        return self.x == p.x and self.y == p.y
 
     def __add__(self, p):
         return Point(self.x + p.x, self.y + p.y)
@@ -73,100 +24,124 @@ class Point:
 
     def __rmul__(self, value):
         return self.__mul__(value)
+
         
 # Convert from screen coordinates to cartesian
-def to_cart(point):
-    return Point(point.x - 512 /2, -point.y + 384 / 2)
+def stoc(p):
+    return Point(p.x - 512 /2, -p.y + 384 / 2)
 
 # Convert from cartesian coordinates to screen
-def to_screen(point):
-    return Point(point.x + 512 / 2, -point.y + 384 / 2)
+def ctos(p):
+    return Point(p.x + 512 / 2, -p.y + 384 / 2)
 
-def inverse_beatLength(beatLength):
-    return -1 / (beatLength / 100)
-
-def inverse_hitobjects(beatmap):
-    for i in beatmap.hitobjects:
-        i.flip()
-            
-def approximate_bezier(points)
-    if len(points) <= 1:
-        return list()
+def svmToFile(sv):
+    return 1 / (sv / -100)
     
-    tmp = bc
-    i = len(bc) - 1
+def fileToSvm(sv):
+    return (1 / sv) * -100
 
-    amount = len(points) * 3;
-    arc = list()
+def calc_distance(p1, p2):
+    return math.sqrt(math.pow(p2.x - p1.x, 2) + math.pow(p2.y - p1.y, 2))
 
-    for c in range(amount, 0, -1):
-        for i in range(len(points) - 1, 0, -1):
-            for j in range(0, i):
-                tmp[j] = tmp[j] + (1 / amount) * (tmp[j+1] - tmp[j])
-            arc.append(tmp[0])
+def calc_length(points):
+    length = 0
 
-    return arc
+    for i in range(0, len(points) - 1):
+        length += calc_distance(points[i], points[i+1])
 
-def get_points_len(points):
-    len = 0
-    for p in range(0, len(points)-1):
-        len += distance(points[i], points[i+1])
+    return length
 
-def distance(p1, p2):
-    return math.sqrt(math.pow(p2.x - p1.x,2) + math.pow(p2.y - p1.y, 2))
+def applyMods(beatmap, mods):
+    if not mods:
+        return
 
-def is_mod_set(mod1, mod2):
-    if mod1 & mod2 > 0:
-        return True
-    else:
-        return False
+    for i in mods:
+        if i == Mod.HardRock:
 
-def is_hitobject_eq(ho1, ho2):
-    if (ho1.type & ho2.type) & ~116 > 0:
-        return True
-    else:
-        return False
+            # Yet hardrock makes replay be reversed
+            # Probably a legacy thing
+            for i in beatmap.hitobjects:
+                i.flip()
 
-def is_key_pressed(frame):
-    if frame.keys & 15 > 0:
-        return True
-    else:
-        return False
+            beatmap.difficulty["CircleSize"] *= 1.3
+            beatmap.difficulty["ApproachRate"] *= 1.4
+            beatmap.difficulty["OverallDifficulty"] *= 1.4
+            beatmap.difficulty["HPDrainRate"] *= 1.4
 
-def get_key_pressed(frame):
-    keys = frame.keys & 15
+            beatmap.hitTimeWindows["300"] /= 1.4
+            beatmap.hitTimeWindows["100"] /= 1.4
+            beatmap.hitTimeWindows["50"] /= 1.4
+            beatmap.hitTimeWindows["miss"] /= 1.4
 
-    if keys & 1:
-        if keys & 4:
-            return Key.K1
-        else:
-            return Key.M1
+        if i == Mod.DoubleTime or i == Mod.Nightcore:
+            # Turns out peppy saves DT replays as nomod replays (lol)
+            # What a strange decision, DT timing would take 0.(6) less space
+            # and osu has to convert DT data to nomod after a play or something
+
+            # Would have changed OD and then calculate hitwindow
+            # But there's no data how accurately OD changes with DT and HT
+            # All we know is that how timings change, OD/AR follow non linear formula
+            # So i have to write these explicitly though they dont fit my view
+            beatmap.hitTimeWindows["300"] *= (2/3)
+            beatmap.hitTimeWindows["100"] *= (2/3)
+            beatmap.hitTimeWindows["50"] *= (2/3)
+            beatmap.hitTimeWindows["miss"] *= (2/3)
+
+        if i == Mod.Easy:
+            beatmap.difficulty["CircleSize"] /= 2
+            beatmap.difficulty["ApproachRate"] /= 2
+            beatmap.difficulty["OverallDifficulty"] /= 2
+            beatmap.difficulty["ApproachRate"] /= 2
+
+            beatmap.hitTimeWindows["300"] *= 0.5
+            beatmap.hitTimeWindows["100"] *= 0.5
+            beatmap.hitTimeWindows["50"] *= 0.5
+            beatmap.hitTimeWindows["miss"] *= 0.5
+
+        if i == Mod.HalfTime:
+            beatmap.hitTimeWindows["300"] *= (4/3)
+            beatmap.hitTimeWindows["100"] *= (4/3)
+            beatmap.hitTimeWindows["50"] *= (4/3)
+            beatmap.hitTimeWindows["miss"] *= (4/3)
+
+def unapplyMods(beatmap, mods):
+    if not mods:
+        return
             
-    elif keys & 2:
-        if keys & 8:
-            return Key.K2
-        else:
-            return Key.M2
+    for i in mods:
+        if i == Mod.HardRock:
+            for i in beatmap.hitobjects:
+                i.flip()
 
-def is_hitobject_clicked(prevFrame, curFrame):
-    return get_key_pressed(prevFrame) != get_key_pressed(curFrame)
+            beatmap.difficulty["CircleSize"] /= 1.3
+            beatmap.difficulty["ApproachRate"] /= 1.4
+            beatmap.difficulty["OverallDifficulty"] /= 1.4
+            beatmap.difficulty["HPDrainRate"] /= 1.4
 
-def is_on_hitobject(hitObject, x, y):
-    ho_cart = to_cart(hitObject.x, hitObject.y)
-    cursor = to_cart(x, y)
+            beatmap.hitTimeWindows["300"] *= 1.4
+            beatmap.hitTimeWindows["100"] *= 1.4
+            beatmap.hitTimeWindows["50"] *= 1.4
+            beatmap.hitTimeWindows["miss"] *= 1.4
 
-    return (math.pow(frame_cart.x - ho_cart.x, 2) + math.pow(frame_cart.y - ho_cart.y, 2)) <= math.pow(circle_radius, 2)
+        if i == Mod.DoubleTime:
+            beatmap.hitTimeWindows["300"] /= (2 / 3)
+            beatmap.hitTimeWindows["100"] /= (2 / 3)
+            beatmap.hitTimeWindows["50"] /= (2 / 3)
+            beatmap.hitTimeWindows["miss"] /= (2 / 3)
 
-# 1. We're inside hit time window. 
-# 2. We pressed the key
-# 3. We're on top of an object
-#   3.1 If it's a circle - we're on top of a circle
-#   3.2 If it's a slider -
-#       * We're on top of a slider-start-circle during first half of the hit time window
-#       * We're on top of a slider-follow-circle during second half of the hit time window
-def is_clicked(hitObject, time, prevFrame, curFrame):
-    if abs(hitObject.time - time) <= hit_window["50"]:
-        if is_hitobject_clicked(prevFrame, curFrame):
-            if is_on_hitobject(hitObject, curFrame.x, curFrame.y):
-                return True
-    return False
+        if i == Mod.Easy:
+            beatmap.difficulty["CircleSize"] *= 2
+            beatmap.difficulty["ApproachRate"] *= 2
+            beatmap.difficulty["OverallDifficulty"] *= 2
+            beatmap.difficulty["ApproachRate"] *= 2
+
+            beatmap.hitTimeWindows["300"] /= 0.5
+            beatmap.hitTimeWindows["100"] /= 0.5
+            beatmap.hitTimeWindows["50"] /= 0.5
+            beatmap.hitTimeWindows["miss"] /= 0.5
+
+        if i == Mod.HalfTime:
+            beatmap.hitTimeWindows["300"] /= (4 / 3)
+            beatmap.hitTimeWindows["100"] /= (4 / 3)
+            beatmap.hitTimeWindows["50"] /= (4 / 3)
+            beatmap.hitTimeWindows["miss"] /= (4 / 3)
