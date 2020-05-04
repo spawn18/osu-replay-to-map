@@ -1,4 +1,6 @@
-<img src="https://i.imgur.com/CIgEu75.png" width="250" height="150">
+<p align="center">
+<img src="https://i.imgur.com/CIgEu75.png" width="500" height="312">
+</p>
 osu!rtm is a program written in Python, that creates maps based on replay. (BETA)
 
 I'll add releases soon, it isn't ready yet but still working. If you want to test it - launch the python code yourself.
