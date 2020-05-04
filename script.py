@@ -1,11 +1,10 @@
-import math
-
-from replay import Replay
-from beatmap import Beatmap
-from utils import applyMods, Point, svmToFile, unapplyMods, stoc
-import sys
-import getopt
 import copy
+import getopt
+import sys
+
+from beatmap import Beatmap
+from replay import Replay
+from utils import *
 
 sys.argv = ["osu!rtm.exe", "--beatmap=target.osu", "--replay=replay.osr"]
 
@@ -18,82 +17,47 @@ longopts = ["help", "beatmap=", "replay=", "gray"]
 opts, args = getopt.getopt(sys.argv[1:], "ghb:r:", longopts)
 
 
-# Help function
-def usage():
-    print("Usage:")
-    print("-b or --beatmap [with argument]    absolute path to an .osu file. Keep it in \"\" quotes. It should be --beatmap=\"YOURPATH\" \n")
-    print("-r or --replay [with argument]    absolute path to an .osr file. In \"\" quotes\n")
-    print("-h or --help    print this usage guide\n")
-    print("-g or --gray    to use gray anchors instead of red")
-    print("Example 1: osu!rtm.exe -b \"C:\\Users\\Me\\AppData\\Local\\osu!\\Songs\\SomeSong\\SomeDifficulty.osu\" -r \"C:\\Users\\Me\\AppData\\Local\\osu!\\Replays\\SomeReplay.osr\"")
-    print("Example 2: osu!rtm.exe --beatmap=\"C:\\Users\\Me\\AppData\\Local\\osu!\\Songs\\SomeSong\\SomeDifficulty.osu\" --replay=\"C:\\Users\\Me\\AppData\\Local\\osu!\\Replays\\SomeReplay.osr\"")
-    print("Advice: You better put the replay and beatmap file in the same temporary folder and rename them to avoid long paths")
-
 useGrayAnchors = False
-
+beatmap = None
+replay = None
 for o, a in opts:
     if o in ("-h", "--help"):
         usage()
         sys.exit()
 
     if o in ("-b", "--beatmap"):
-        if a.startswith("\""):
-            beatmap_path = a[1:-1]
-            tmp = beatmap_path.split("\\")
-            beatmap_path = tmp[len(tmp) - 1]
-        else:
-            beatmap_path = a
+        beatmap = Beatmap(a)
+        print("[GOOD] Found beatmap!")
 
     if o in ("-r", "--replay"):
-        if a.startswith("\""):
-            replay_path = a[1:-1]
-            tmp = replay_path.split("\\")
-            replay_path = tmp[len(tmp) - 1]
-        else:
-            replay_path = a
+        replay = Replay(a)
+        print("[GOOD] Found replay!")
 
     if o in ("-g", "--gray"):
         useGrayAnchors = True
 
-# Replay
-replay = Replay(replay_path)
 
-beatmapOld = Beatmap(beatmap_path)
-beatmapNew = Beatmap(beatmap_path)
-
-applyMods(beatmapNew, replay.mods)
-applyMods(beatmapOld, replay.mods)
+applyMods(beatmap, replay.mods)
 
 
-
-# Keys that were pressed on the previous frame
-lastKeys = 0
-
-def isClicked(totalTime, hitobject, frame, lastKeys):
-
-    if abs(hitobject.time - totalTime) <= beatmapNew.hitTimeWindows["50"]:
-        if (frame.keys != lastKeys and frame.keys != 0 and lastKeys != 15):
-            coordsPoint = stoc(Point(hitobject.x, hitobject.y))
-            framePoint = stoc(Point(frame.x, frame.y))
-            if (math.pow(framePoint.x - coordsPoint.x, 2) + math.pow(framePoint.y - coordsPoint.y, 2)) <= math.pow(beatmapNew.circleRadius, 2):
-                print("With lastKeys:{}".format(lastKeys))
-                return True
-    return False
-
+# Loop variables
 startFrame = 0
 totalTimeStamp = 0
+lastKeys = 0
 
-#ttime = 0
-#for j in replay.frames:
-    #ttime += j.time
-    #print("TotalTime:{} x:{} y:{} keys:{} ".format(ttime, j.x, j.y, j.keys))
 
+oldTimingPoints = copy.deepcopy(beatmap.timingPoints)
+
+print("Starting...")
 
 # Iterate over beatmap objects
-for i in range(0, len(beatmapNew.hitobjects)):
+for i in range(0, len(beatmap.hitobjects)):
+
+    if i == len(beatmap.hitobjects) - 1:
+        isLastObject = True
 
     # Skip spinners
-    if beatmapNew.hitobjects[i].type & 8:
+    if beatmap.hitobjects[i].type & 8:
         continue
 
     # Set total time to total time of last click
@@ -105,113 +69,126 @@ for i in range(0, len(beatmapNew.hitobjects)):
         replay.totalTime += replay.frames[f].time
 
         # We found an object
-        if isClicked(replay.totalTime, beatmapNew.hitobjects[i], replay.frames[f], lastKeys):
+        if isClicked(beatmap, replay.totalTime, beatmap.hitobjects[i], replay.frames[f], lastKeys):
 
             totalTimeStamp = replay.totalTime
 
-            beatmapNew.hitobjects[i].x = int(replay.frames[f].x)
-            beatmapNew.hitobjects[i].y = int(replay.frames[f].y)
+            beatmap.hitobjects[i].x = int(replay.frames[f].x)
+            beatmap.hitobjects[i].y = int(replay.frames[f].y)
 
             # If slider
-            if beatmapNew.hitobjects[i].type & 2:
+            if beatmap.hitobjects[i].type & 2:
 
-                print("Clicked slider at ^")
-                beatmapNew.hitobjects[i].curvePoints = list()
-                beatmapNew.hitobjects[i].curveType = "B"
+                beatmap.hitobjects[i].curvePoints = list()
+                beatmap.hitobjects[i].curveType = "B"
 
                 lastKeys = replay.frames[f].keys
-
                 g = f + 1
                 replay.totalTime += replay.frames[g].time
-                while replay.totalTime <= (beatmapNew.hitobjects[i].time + (beatmapNew.hitobjects[i].duration / beatmapNew.hitobjects[i].slides)):
 
-                    beatmapNew.hitobjects[i].curvePoints.append(Point(round(replay.frames[g].x), round(replay.frames[g].y)))
+                hitobjectEndTime = round((beatmap.hitobjects[i].time + (beatmap.hitobjects[i].duration / beatmap.hitobjects[i].slides)))
+                while replay.totalTime <= hitobjectEndTime:
+
+                    curPoint = Point(round(replay.frames[g].x), round(replay.frames[g].y))
+                    prevPoint = Point(round(replay.frames[g-1].x), round(replay.frames[g-1].y))
+
+                    # Exclude duplicates
+                    if curPoint != prevPoint:
+                        beatmap.hitobjects[i].curvePoints.append(Point(round(replay.frames[g].x), round(replay.frames[g].y)))
 
                     lastKeys = replay.frames[g].keys
                     g += 1
                     replay.totalTime += replay.frames[g].time
 
-                # This branch has little chance of happening yet it does happen
-                # It is difficult to explain as to why it works this way
-                # But if you were into project hard like me this would be the only acceptable solution. At least for me now
-                if (len(beatmapNew.hitobjects[i].curvePoints) == 0) :
-                    beatmapNew.hitobjects[i].curvePoints.append(Point(round(replay.frames[g-1].x + 1), round(replay.frames[g-1].y + 1)))
+
+                if len(beatmap.hitobjects[i].curvePoints) <= 1:
+                    beatmap.hitobjects[i].curvePoints.append(Point(round(replay.frames[g - 1].x + 1), round(replay.frames[g - 1].y + 1)))
 
                 # Compensate point if no exact ending frame
                 """
-                TODO ???
-                else:
-                    ms = replay.frames[g].time - replay.frames[g - 1].time
-                    if (int(ms) != 0):
-                        distance = math.sqrt(math.pow(replay.frames[g].x - replay.frames[g-1].x,2) + math.pow(replay.frames[g].y - replay.frames[g-1].y,2 ))
+                if replay.frames[g-1].time != hitobjectEndTime:
+                    amount = calc_distance(Point(replay.frames[g-1].x, replay.frames[g-1].y), Point(replay.frames[g].x, replay.frames[g].y))
+                    t = 0
+                    while True:
+                        p1 = Point(replay.frames[g-1].x, replay.frames[g-1].y)
+                        p2 = Point(replay.frames[g].x, replay.frames[g].y)
+                        p3 = p1 + (t/amount) * (p2-p1)
+
+                        if int(
+                        t += 1
                 """
 
-                # If the length is none - extend the slider artificially
-                # This branch has 99.9% more chance of occuring with mouse players. Guess why...
-                # First one to guess pm me and get supporter on osu
-                while True:
-                    if not useGrayAnchors:
-                        beatmapNew.hitobjects[i].calcLength()
-                    else:
-                        beatmapNew.hitobjects[i].calcBezierLength()
+                # Calculate length for new slider
+                if useGrayAnchors:
+                    beatmap.hitobjects[i].calcBezierLength()
+                else:
+                    beatmap.hitobjects[i].calcLength()
 
-                    if int(beatmapNew.hitobjects[i].length) != 0:
-                        break
-                    beatmapNew.hitobjects[i].curvePoints.append(Point(round(replay.frames[g - 1].x + 1), round(replay.frames[g - 1].y + 1)))
 
+                # If red anchors are used duplicate every point
                 if not useGrayAnchors:
-                    beatmapNew.hitobjects[i].curvePoints = [x for x in beatmapNew.hitobjects[i].curvePoints for _ in range(2)]
+                    beatmap.hitobjects[i].curvePoints = [copy.copy(x) for x in beatmap.hitobjects[i].curvePoints for _ in range(2)]
+
 
                 # Calculate new timing point for slider
-                uninheritedPoint = beatmapNew.getUninheritedPoint(beatmapOld.hitobjects[i].time)
-                inheritedPointCopy = copy.deepcopy(beatmapOld.getInheritedPoint(uninheritedPoint, beatmapNew.hitobjects[i].time))
-                if(inheritedPointCopy == None):
-                    inheritedPointCopy = copy.deepcopy(uninheritedPoint)
-                    inheritedPointCopy.type = 0
+                originalBeatLength = 0
+                wasLess = False
+                while True:
+                    uninheritedPoint = copy.deepcopy(getUninheritedPoint(beatmap.timingPoints, beatmap.hitobjects[i].time))
+                    inheritedPoint = copy.deepcopy(getInheritedPoint(beatmap.timingPoints, uninheritedPoint, beatmap.hitobjects[i].time))
+                    if(inheritedPoint == None):
+                        inheritedPoint = copy.deepcopy(uninheritedPoint)
+                        inheritedPoint.type = 0
 
-                inheritedPointCopy.time = beatmapNew.hitobjects[i].time
-                inheritedPointCopy.beatLength = (beatmapOld.hitobjects[i].slides * uninheritedPoint.beatLength * beatmapNew.hitobjects[i].length) / (beatmapOld.hitobjects[i].duration * beatmapNew.difficulty["SliderMultiplier"] * 100)
+                    inheritedPoint.time = beatmap.hitobjects[i].time
+                    inheritedPoint.beatLength = (beatmap.hitobjects[i].slides * uninheritedPoint.beatLength * beatmap.hitobjects[i].length) / (beatmap.hitobjects[i].duration * beatmap.difficulty["SliderMultiplier"] * 100)
 
-                # If SVM is less than 0.1 (osu counts any svm's less than that as 0.1)
-                # Compensate speed with uninherited point
-                """
-                if (inheritedPointCopy.beatLength < 0.1):
-                    beatLength = uninheritedPoint.beatLength
+                    # If SVM is less than 0.1 Compensate speed with uninherited point
+                    if (inheritedPoint.beatLength < 0.1):
+
+                        # Bad design
+                        if not wasLess:
+                            originalBeatLength = uninheritedPoint.beatLength
+                            wasLess = True
 
                         # Divide beat length for current object and write it
                         uninheritedPoint.beatLength *= 2
-                        beatmapNew.addTimingPoint(uninheritedPoint)
-
-                        if not isLastHitobject:
-                            nextUninheritedPointCopy = copy.deepcopy(beatmapOld.getUninheritedPoint(beatmapOld.hitobjects[i + 1].time))
-
-                            # If the next object doesnt have uninherited point (BPM will get messed up), write the old one
-                            if nextUninheritedPointCopy.time == uninheritedPoint.time:
-                                nextUninheritedPointCopy.beatLength = beatLength
-                                beatmapNew.addTimingPoint(nextUninheritedPointCopy)
-                        else:
-                            break
+                        uninheritedPoint.time = beatmap.hitobjects[i].time
+                        beatmap.addTimingPoint(uninheritedPoint)
 
                     else:
                         break
-                """
 
-                inheritedPointCopy.beatLength = svmToFile(inheritedPointCopy.beatLength)
-                beatmapNew.addTimingPoint(inheritedPointCopy)
+                # Add new uninherited point for the next object
+                if wasLess:
+                    nextUninheritedPoint = copy.deepcopy(getUninheritedPoint(oldTimingPoints, beatmap.hitobjects[i + 1].time))
+
+                    # If there's a new manual point for the next object don't add new
+                    if nextUninheritedPoint.time != uninheritedPoint.time:
+                        nextUninheritedPoint.beatLength = originalBeatLength
+                        nextUninheritedPoint.time = beatmap.hitobjects[i + 1].time
+                        beatmap.addTimingPoint(nextUninheritedPoint)
+
+
+                inheritedPoint.beatLength = svmToFile(inheritedPoint.beatLength)
+                beatmap.addTimingPoint(inheritedPoint)
 
             lastKeys = replay.frames[f].keys
             startFrame = f + 1
+
+            printProgressBar(i, len(beatmap.hitobjects), prefix='Generating hitobjects:', suffix='Done', length=50)
             break
 
         lastKeys = replay.frames[f].keys
 
+beatmap.metadata["Tags"].append("osu!rtm")
+beatmap.metadata["Version"] = "osu!rtm's " + beatmap.metadata["Version"]
+beatmap.filename = beatmap.metadata["Artist"] + " - " + beatmap.metadata["Title"] + " (" + beatmap.metadata[
+    "Creator"] + ")" + " [" + beatmap.metadata["Version"] + "].osu"
 
-beatmapNew.metadata["Tags"].append("osu!rtm")
-beatmapNew.metadata["Version"] = "osu!rtm's " + beatmapNew.metadata["Version"]
-beatmapNew.filename = beatmapNew.metadata["Artist"] + " - " + beatmapNew.metadata["Title"] + " (" + beatmapNew.metadata[
-    "Creator"] + ")" + " [" + beatmapNew.metadata["Version"] + "].osu"
+printProgressBar(len(beatmap.hitobjects), len(beatmap.hitobjects), prefix='Generating hitobjects:', suffix='Done', length=50)
 
-
-# Write to new file
-unapplyMods(beatmapNew, replay.mods)
-beatmapNew.writeFile()
+unapplyMods(beatmap, replay.mods)
+print("Writing new beatmap...")
+beatmap.writeFile()
+print("Done!")

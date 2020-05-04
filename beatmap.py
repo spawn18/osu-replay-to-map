@@ -1,5 +1,5 @@
 from hitobjects import *
-from utils import Point, fileToSvm
+from utils import Point, fileToSvm, getUninheritedPoint, getInheritedPoint
 
 
 class Beatmap:
@@ -18,62 +18,38 @@ class Beatmap:
         self.section = -1
 
         try:
-            file = open(fullpath, encoding="utf8")
-            rawLines = file.readlines()
+            with open(fullpath, encoding="utf8") as file:
+                rawLines = file.readlines()
 
-            tmp = fullpath.split("\\")
-            if tmp:
-                self.path = "".join(tmp[:-1])
-                self.filename = "".join(tmp[-1])
-            else:
-                self.path = str()
-                self.filename = fullpath
-                
-            self.osuFileVersion = rawLines[0].replace("\n", "")
-            
-            for line in rawLines:
-                self.parse_line(line.replace("\n", ""))
-
-            #
-            #         |                                              |
-            #   miss  |  50  |  100  |  300  I  300  |  100  |  50   |  miss
-            #         [______________________________________________]
-            #                         Minimal HitTimeWindow
-            self.hitTimeWindows["300"] = 79 - (self.difficulty["OverallDifficulty"] * 6)  + 0.5
-            self.hitTimeWindows["100"] = 139 - (self.difficulty["OverallDifficulty"] * 8) + 0.5
-            self.hitTimeWindows["50"] = 199 - (self.difficulty["OverallDifficulty"] * 10) + 0.5
-            self.hitTimeWindows["miss"] = 259 - (self.difficulty["OverallDifficulty"] * 12) + 0.5
-
-            self.circleRadius = (109 - 9 * self.difficulty["CircleSize"]) / 2
-            
         except IOError:
-            print("Error: beatmap couldn't be opened")
+            print("[ERROR] Beatmap couldn't be opened")
+
+        tmp = fullpath.split("\\")
+        if tmp:
+            self.path = "".join(tmp[:-1])
+            self.filename = "".join(tmp[-1])
+        else:
+            self.path = str()
+            self.filename = fullpath
+                
+        self.osuFileVersion = rawLines[0].replace("\n", "")
+            
+        for line in rawLines:
+            self.parse_line(line.replace("\n", ""))
+
+        #
+        #         |                                              |
+        #   miss  |  50  |  100  |  300  I  300  |  100  |  50   |  miss
+        #         [______________________________________________]
+        #                         Minimal HitTimeWindow
+        self.hitTimeWindows["300"] = 79 - (self.difficulty["OverallDifficulty"] * 6)  + 0.5
+        self.hitTimeWindows["100"] = 139 - (self.difficulty["OverallDifficulty"] * 8) + 0.5
+        self.hitTimeWindows["50"] = 199 - (self.difficulty["OverallDifficulty"] * 10) + 0.5
+        self.hitTimeWindows["miss"] = 259 - (self.difficulty["OverallDifficulty"] * 12) + 0.5
+
+        self.circleRadius = (109 - 9 * self.difficulty["CircleSize"]) / 2
 
 
-
-    def getUninheritedPoint(self, objectTime):
-        r = None
-
-        for point in self.timingPoints:
-            if point.time <= objectTime:
-                if point.type == 1:
-                    r = point
-            else:
-                break
-
-        return r
-
-    def getInheritedPoint(self, uninheritedPoint, objectTime):
-        r = None
-
-        for point in self.timingPoints:
-            if point.time <= objectTime:
-                if point.time >= uninheritedPoint.time and point.type == 0:
-                    r = point
-            else:
-                break
-
-        return r
         
     def parse_line(self, line):
 
@@ -120,6 +96,10 @@ class Beatmap:
 
     def handle_metadata(self, line):
         line = line.split(":")
+
+        # For titles like <Re:Queen'm>, etc.
+        if len(line) > 2:
+            self.metadata[line[0]] = "".join(line)
 
         if line[0] == "Tags":
             self.metadata[line[0]] = line[1].split(" ")
@@ -221,9 +201,9 @@ class Beatmap:
                 hitobject.hitsample = line[10]
 
 
-            uninheritedPoint = self.getUninheritedPoint(hitobject.time)
-            inheritedPoint = self.getInheritedPoint(uninheritedPoint, hitobject.time)
-            if(inheritedPoint == None):
+            uninheritedPoint = getUninheritedPoint(self.timingPoints, hitobject.time)
+            inheritedPoint = getInheritedPoint(self.timingPoints, uninheritedPoint, hitobject.time)
+            if inheritedPoint == None:
                 hitobject.calcDuration(self.difficulty["SliderMultiplier"], uninheritedPoint.beatLength, 1)
             else:
                 hitobject.calcDuration(self.difficulty["SliderMultiplier"], uninheritedPoint.beatLength, fileToSvm(inheritedPoint.beatLength))
@@ -361,3 +341,4 @@ class Beatmap:
         self.filename = self.filename.replace("?", "")
         with open(self.path + self.filename, "w+", encoding="utf-8") as fileOut:
             fileOut.write(fileLine)
+
