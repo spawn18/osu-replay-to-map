@@ -1,5 +1,5 @@
 <p align="center">
-<img src="https://i.imgur.com/CIgEu75.png" width="500" height="312">
+<img src="https://i.imgur.com/CIgEu75.png" width="500" height="297">
 </p>
 osu!rtm is a program written in Python, that creates maps based on replay. (BETA)
 
