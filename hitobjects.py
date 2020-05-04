@@ -1,5 +1,6 @@
+import copy
 
-from utils import screen_height, stoc, Point, calc_length, calc_distance
+from utils import screen_height, Point, calc_length, calc_distance, get_point
 
 
 class TimingPoint:
@@ -73,20 +74,28 @@ class Slider(Hitobject):
     # Because all resulting sliders are B type
     def calcLength(self):
         if self.curveType == "B":
+            if len(self.curvePoints) <= 1:
+                return 0
+
             points = list()
             points.append(Point(self.x, self.y))
             points.extend(self.curvePoints)
 
             self.length = calc_length(points)
 
+
     def calcBezierLength(self):
         if self.curveType == "B":
+            if len(self.curvePoints) <= 1:
+                return 0
+
+            # If the curve is too dense and big - give up and calculate it the easy way
 
             points = list()
             points.append(Point(self.x, self.y))
             points.extend(self.curvePoints)
 
-            tmp = points.copy()
+            tmp = copy.deepcopy(points)
 
             self.calcLength()
             amount = int(self.length)
@@ -103,25 +112,20 @@ class Slider(Hitobject):
 
                     k = 0
                     while k < i:
-                        tmp[k] = tmp[k] + (t/amount) * (tmp[k+1] - tmp[k])
+                        tmp[k] = get_point(tmp[k], tmp[k+1], t/amount)
                         k += 1
-
                     i -= 1
 
-                arcPoints.append(tmp[0])
+                arcPoints.append(copy.deepcopy(tmp[0]))
                 t += 1
 
-            while True:
-                if(len(arcPoints)) <= 2:
-                    break
+            #for i in range(0, 150):
+                #if(len(arcPoints)) <= 2:
+                    #break
 
-                for i in range(0, len(arcPoints) - 2):
-                    arcPoints[i+1].x = (arcPoints[i+2].x + arcPoints[i].x) / 2
-                    arcPoints[i+1].y = (arcPoints[i+2].y + arcPoints[i].y) / 2
-
-                if calc_distance(arcPoints[0], arcPoints[1]) <= 1:
-                    break
-
+                #for i in range(0, len(arcPoints) - 2):
+                    #arcPoints[i+1].x = (arcPoints[i].x + arcPoints[i+2].x) / 2
+                    #arcPoints[i+1].y = (arcPoints[i].y + arcPoints[i+2].y) / 2
 
             self.length = calc_length(arcPoints)
 

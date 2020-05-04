@@ -78,8 +78,11 @@ class Replay(object):
         self.frames = None
         self.totalTime = 0
 
-        with open(replay_path, 'rb') as f:
-            data = f.read()
+        try:
+            with open(replay_path, 'rb') as f:
+                data = f.read()
+        except IOError:
+            print("[ERROR] Replay couldn't be opened")
         
         self.parse_replay_and_initialize_fields(data)
 
