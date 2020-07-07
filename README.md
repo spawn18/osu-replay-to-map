@@ -1,5 +1,6 @@
 <p align="center">abandoned for a long time. I've realized there's been many problemes i couldn't solve (that weren't mine though) and its a big pain to program for a game that has documentation dating years old. Auto works fine, it copies auto movements exactly as supposed to be, but when it comes to some maps played with fast sliders (Exit this earth atomoposhere as an example) there are frames way out of slider that if they really existed it would have been a sliderbreak. I tested it a lot and still couldn't understand whats the issue. The first thing was in my mind is i messed up in loops somewhere, and realized that i did and it worked better without the fix! Sliders are sometimes generated way longer than supposed to be, if a player fc'd the slider it would never be that big because of slider follow circle. I can't help it.
   
+  
 <img src="https://i.imgur.com/CIgEu75.png" width="500" height="297">
 </p>
 osu!rtm is a program written in Python, that creates maps based on replay. (BETA)
