@@ -2,6 +2,5 @@
 
 osu!rtm is a program written in Python, that creates maps based on replay.
 
-Currently inactive - not working properly for some maps
+Currently not working properly for some maps
 
-Made by [Whereabout](https://osu.ppy.sh/users/15201580)
